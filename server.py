@@ -1,48 +1,58 @@
-
 from flask import Flask, request, jsonify
+import threading
 
 app = Flask(__name__)
 
-# Guarda temporariamente a última autorização recebida
+# Guarda temporariamente o último pagamento aprovado
 pagamento_aprovado = None
+
+# Evita problemas se chegarem várias notificações ao mesmo tempo
+lock = threading.Lock()
 
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global pagamento_aprovado
 
-    # Dados enviados pelo Mercado Pago
-    dados = request.get_json(silent=True)
+    # Lê o JSON enviado pelo Mercado Pago
+    dados = request.get_json(silent=True) or {}
 
-    # Também pega os dados enviados na URL
-    data_id = request.args.get("data.id")
-    tipo = request.args.get("type")
+    # Lê também os parâmetros enviados na URL
+    data_id_url = request.args.get("data.id")
+    tipo_url = request.args.get("type")
+
+    # Pega os dados do JSON
+    tipo_json = dados.get("type")
+    action = dados.get("action")
+
+    data = dados.get("data", {})
+    data_id_json = data.get("id")
+
+    # Usa o ID que estiver disponível
+    data_id = data_id_url or data_id_json
+    tipo = tipo_url or tipo_json
 
     print("===================================")
     print("WEBHOOK RECEBIDO")
-    print("Data ID:", data_id)
     print("Tipo:", tipo)
+    print("Action:", action)
+    print("Data ID:", data_id)
     print("Dados:", dados)
 
     # Verifica se é uma notificação de Order
-    if tipo == "order":
-        pagamento_aprovado = {
-            "id": data_id,
-            "status": "processado"
-        }
+    if tipo == "order" and data_id:
+
+        with lock:
+            pagamento_aprovado = {
+                "id": str(data_id),
+                "status": "processado"
+            }
 
         print("PAGAMENTO APROVADO!")
         print("ID DA ORDEM:", data_id)
 
-    # Também aceita o formato JSON
-    if dados and dados.get("action") == "order.processed":
-        pagamento_aprovado = {
-            "id": dados.get("data", {}).get("id"),
-            "status": "processado"
-        }
-
-        print("PAGAMENTO APROVADO!")
-        print("ID DA ORDEM:", pagamento_aprovado["id"])
+    else:
+        print("WEBHOOK RECEBIDO, MAS NAO FOI ARMAZENADO.")
 
     print("===================================")
 
@@ -51,9 +61,24 @@ def webhook():
 
 @app.route("/pagamento", methods=["GET"])
 def pagamento():
-    # Endpoint que futuramente será consultado pelo ESP32
-    if pagamento_aprovado:
-        return jsonify(pagamento_aprovado), 200
+    global pagamento_aprovado
+
+    with lock:
+
+        # Se existe pagamento aguardando
+        if pagamento_aprovado:
+
+            pagamento = pagamento_aprovado
+
+            # Remove imediatamente para não executar duas vezes
+            pagamento_aprovado = None
+
+            print("PAGAMENTO ENTREGUE AO ESP32:")
+            print(pagamento)
+
+            return jsonify(pagamento), 200
+
+    print("Nenhum pagamento aguardando.")
 
     return jsonify({
         "status": "nenhum_pagamento"
@@ -67,4 +92,3 @@ def inicio():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
