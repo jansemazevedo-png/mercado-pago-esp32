@@ -94,7 +94,13 @@ def pagamento():
 def inicio():
     return "Servidor Mercado Pago + ESP32 funcionando!"
 
-
+@app.route("/terminal", methods=["GET"])
+def terminal():
+    return jsonify({
+        "mensagem": "Rota de teste criada",
+        "proximo_passo": "verificar Point Pro 3"
+    }), 200
+    
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
