@@ -151,7 +151,6 @@ except Exception as erro:
     print("")
 
     return None
-```
 
 # ==========================================
 
