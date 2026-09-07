@@ -96,10 +96,48 @@ def inicio():
 
 @app.route("/terminal", methods=["GET"])
 def terminal():
-    return jsonify({
-        "mensagem": "Rota de teste criada",
-        "proximo_passo": "verificar Point Pro 3"
-    }), 200
+    import os
+    import urllib.request
+    import urllib.parse
+
+    token = os.environ.get("MP_ACCESS_TOKEN")
+
+    if not token:
+        return jsonify({
+            "erro": "MP_ACCESS_TOKEN não configurado"
+        }), 500
+
+    url = "https://api.mercadopago.com/terminals/v1/list"
+
+    parametros = urllib.parse.urlencode({
+        "limit": "50",
+        "offset": "0",
+        "store_id": "77202273",
+        "pos_id": "137651952"
+    })
+
+    requisicao = urllib.request.Request(
+        url + "?" + parametros,
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json"
+        },
+        method="GET"
+    )
+
+    try:
+        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
+            dados = resposta.read().decode("utf-8")
+
+        return jsonify({
+            "http_code": 200,
+            "mercado_pago": __import__("json").loads(dados)
+        }), 200
+
+    except Exception as erro:
+        return jsonify({
+            "erro": str(erro)
+        }), 500
     
 if __name__ == "__main__":
     app.run(
