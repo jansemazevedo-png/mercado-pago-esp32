@@ -46,8 +46,8 @@ ids_processados = set()
 
 def criar_cobranca():
 
-global ordem_atual
-global cobranca_criada
+    global ordem_atual
+    global cobranca_criada
 
 token = os.environ.get("MP_ACCESS_TOKEN")
 
