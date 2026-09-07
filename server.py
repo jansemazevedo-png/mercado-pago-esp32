@@ -138,7 +138,76 @@ def terminal():
         return jsonify({
             "erro": str(erro)
         }), 500
-    
+    @app.route("/cobrar", methods=["GET"])
+def cobrar():
+    import os
+    import json
+    import uuid
+    import urllib.request
+
+    token = os.environ.get("MP_ACCESS_TOKEN")
+
+    if not token:
+        return jsonify({
+            "erro": "MP_ACCESS_TOKEN não configurado"
+        }), 500
+
+    url = "https://api.mercadopago.com/v1/orders"
+
+    dados = {
+        "type": "point",
+        "external_reference": "teste-r5-" + uuid.uuid4().hex[:12],
+        "transactions": {
+            "payments": [
+                {
+                    "amount": "5.00"
+                }
+            ]
+        },
+        "config": {
+            "point": {
+                "terminal_id": "PAX_Q92__Q92-1734003340",
+                "print_on_terminal": "no_ticket"
+            }
+        },
+        "description": "Teste maquina R$ 5"
+    }
+
+    corpo = json.dumps(dados).encode("utf-8")
+
+    requisicao = urllib.request.Request(
+        url,
+        data=corpo,
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "X-Idempotency-Key": str(uuid.uuid4())
+        },
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(requisicao, timeout=20) as resposta:
+            resultado = resposta.read().decode("utf-8")
+
+        return jsonify({
+            "http_code": 201,
+            "mercado_pago": json.loads(resultado)
+        }), 201
+
+    except urllib.error.HTTPError as erro:
+        resposta = erro.read().decode("utf-8")
+
+        return jsonify({
+            "http_code": erro.code,
+            "mercado_pago": json.loads(resposta)
+        }), erro.code
+
+    except Exception as erro:
+        return jsonify({
+            "erro": str(erro)
+        }), 500
+        
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
