@@ -138,7 +138,7 @@ def terminal():
         return jsonify({
             "erro": str(erro)
         }), 500
-    @app.route("/cobrar", methods=["GET"])
+@app.route("/cobrar", methods=["GET"])
 def cobrar():
     import os
     import json
