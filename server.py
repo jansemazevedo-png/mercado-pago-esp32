@@ -1,579 +1,893 @@
 from flask import Flask, request, jsonify
-import threading
 import os
 import json
 import uuid
 import urllib.request
 import urllib.error
 import urllib.parse
+import threading
 import time
 
-app = Flask(__name__)
+app = Flask(**name**)
 
-# ==========================================================
+# ==========================================
+
 # CONFIGURAÇÃO
-# ==========================================================
+
+# ==========================================
 
 VALOR = "5.00"
 
 TERMINAL_ID = "PAX_Q92__Q92-1734003340"
+STORE_ID = "77202273"
+POS_ID = "137651952"
 
-INTERVALO_VERIFICACAO = 3
+INTERVALO_PAGAMENTO = 3
 
+# ==========================================
 
-# ==========================================================
-# CONTROLE
-# ==========================================================
+# CONTROLE DO SISTEMA
+
+# ==========================================
 
 lock = threading.Lock()
 
-pagamento_aprovado = None
-
 ordem_atual = None
-
+pagamento_aprovado = None
 cobranca_criada = False
+
+# Guarda as Orders que já foram entregues ao ESP32
 
 ids_processados = set()
 
+# ==========================================
 
-# ==========================================================
 # CRIAR COBRANÇA DE R$ 5,00
-# ==========================================================
+
+# ==========================================
 
 def criar_cobranca():
 
-    global ordem_atual
-    global cobranca_criada
+```
+global ordem_atual
+global cobranca_criada
 
-    token = os.environ.get("MP_ACCESS_TOKEN")
+token = os.environ.get("MP_ACCESS_TOKEN")
 
-    if not token:
+if not token:
+    print("ERRO: MP_ACCESS_TOKEN NÃO CONFIGURADO.")
+    return None
 
-        print("ERRO: MP_ACCESS_TOKEN não configurado.")
+url = "https://api.mercadopago.com/v1/orders"
+
+referencia = "auto-r5-" + uuid.uuid4().hex[:12]
+
+dados = {
+    "type": "point",
+
+    "external_reference": referencia,
+
+    "expiration_time": "PT15M",
+
+    "transactions": {
+        "payments": [
+            {
+                "amount": VALOR
+            }
+        ]
+    },
+
+    "config": {
+        "point": {
+            "terminal_id": TERMINAL_ID,
+            "print_on_terminal": "no_ticket"
+        }
+    },
+
+    "description": "Venda automatica R$ 5"
+}
+
+corpo = json.dumps(dados).encode("utf-8")
+
+requisicao = urllib.request.Request(
+    url,
+    data=corpo,
+    headers={
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": str(uuid.uuid4())
+    },
+    method="POST"
+)
+
+try:
+
+    with urllib.request.urlopen(
+        requisicao,
+        timeout=20
+    ) as resposta:
+
+        resultado = resposta.read().decode("utf-8")
+
+    resultado_json = json.loads(resultado)
+
+    nova_ordem = resultado_json.get("id")
+
+    if not nova_ordem:
+
+        print("ERRO: MERCADO PAGO NÃO RETORNOU ID DA ORDER.")
+
+        print(resultado_json)
 
         return None
 
-    url = "https://api.mercadopago.com/v1/orders"
+    with lock:
 
-    referencia = "auto-r5-" + uuid.uuid4().hex[:12]
-
-    dados = {
-
-        "type": "point",
-
-        "external_reference": referencia,
-
-        "expiration_time": "PT15M",
-
-        "transactions": {
-
-            "payments": [
-
-                {
-                    "amount": VALOR
-                }
-
-            ]
-
-        },
-
-        "config": {
-
-            "point": {
-
-                "terminal_id": TERMINAL_ID,
-
-                "print_on_terminal": "no_ticket"
-
-            }
-
-        },
-
-        "description": "Venda automatica R$ 5"
-
-    }
-
-    corpo = json.dumps(dados).encode("utf-8")
-
-    requisicao = urllib.request.Request(
-
-        url,
-
-        data=corpo,
-
-        headers={
-
-            "Authorization": "Bearer " + token,
-
-            "Content-Type": "application/json",
-
-            "X-Idempotency-Key": str(uuid.uuid4())
-
-        },
-
-        method="POST"
-
-    )
-
-    try:
-
-        with urllib.request.urlopen(
-            requisicao,
-            timeout=20
-        ) as resposta:
-
-            resultado = resposta.read().decode("utf-8")
-
-        resultado_json = json.loads(resultado)
-
-        ordem_atual = resultado_json.get("id")
-
+        ordem_atual = nova_ordem
         cobranca_criada = True
 
-        print("")
-        print("==========================================")
-        print("NOVA COBRANÇA CRIADA")
-        print("==========================================")
-        print("ORDEM:", ordem_atual)
-        print("REFERÊNCIA:", referencia)
-        print("VALOR: R$ 5,00")
-        print("STATUS:", resultado_json.get("status"))
-        print("POINT PRONTA PARA PAGAMENTO")
-        print("==========================================")
-        print("")
+    print("")
+    print("==========================================")
+    print("NOVA COBRANÇA CRIADA")
+    print("==========================================")
+    print("ORDER:", nova_ordem)
+    print("REFERÊNCIA:", referencia)
+    print("VALOR: R$ 5,00")
+    print("STATUS:", resultado_json.get("status"))
+    print("POINT PRONTA PARA PAGAMENTO")
+    print("==========================================")
+    print("")
 
-        return resultado_json
+    return resultado_json
 
-    except urllib.error.HTTPError as erro:
+except urllib.error.HTTPError as erro:
 
-        resposta = erro.read().decode("utf-8")
+    resposta = erro.read().decode("utf-8")
 
-        print("")
-        print("==========================================")
-        print("ERRO MERCADO PAGO")
-        print("HTTP:", erro.code)
-        print(resposta)
-        print("==========================================")
-        print("")
+    print("")
+    print("==========================================")
+    print("ERRO MERCADO PAGO")
+    print("==========================================")
+    print("HTTP:", erro.code)
+    print(resposta)
+    print("==========================================")
+    print("")
 
-        return None
+    return None
 
-    except Exception as erro:
+except Exception as erro:
 
-        print("")
-        print("ERRO AO CRIAR COBRANÇA:")
-        print(erro)
-        print("")
+    print("")
+    print("ERRO AO CRIAR COBRANÇA:")
+    print(erro)
+    print("")
 
-        return None
+    return None
+```
 
+# ==========================================
 
-# ==========================================================
-# CONSULTAR ORDER DIRETAMENTE NO MERCADO PAGO
-# ==========================================================
+# CONSULTAR ORDER NO MERCADO PAGO
+
+# ==========================================
 
 def consultar_ordem(order_id):
 
-    token = os.environ.get("MP_ACCESS_TOKEN")
+```
+token = os.environ.get("MP_ACCESS_TOKEN")
 
-    if not token:
+if not token:
 
-        print("ERRO: MP_ACCESS_TOKEN não configurado.")
+    print("ERRO: MP_ACCESS_TOKEN NÃO CONFIGURADO.")
 
-        return None
+    return None
 
-    url = (
-        "https://api.mercadopago.com/v1/orders/"
-        + str(order_id)
+url = (
+    "https://api.mercadopago.com/v1/orders/"
+    + str(order_id)
+)
+
+requisicao = urllib.request.Request(
+    url,
+    headers={
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json"
+    },
+    method="GET"
+)
+
+try:
+
+    with urllib.request.urlopen(
+        requisicao,
+        timeout=15
+    ) as resposta:
+
+        dados = resposta.read().decode("utf-8")
+
+    resultado = json.loads(dados)
+
+    return resultado
+
+except urllib.error.HTTPError as erro:
+
+    resposta = erro.read().decode("utf-8")
+
+    print("")
+    print("ERRO CONSULTANDO ORDER")
+    print("HTTP:", erro.code)
+    print(resposta)
+    print("")
+
+    return None
+
+except Exception as erro:
+
+    print("")
+    print("ERRO CONSULTANDO ORDER:")
+    print(erro)
+    print("")
+
+    return None
+```
+
+# ==========================================
+
+# VERIFICAR SE O PAGAMENTO FOI APROVADO
+
+# ==========================================
+
+def verificar_order_aprovada(order_id):
+
+```
+dados = consultar_ordem(order_id)
+
+if not dados:
+
+    return False
+
+status = dados.get("status")
+
+status_detail = dados.get("status_detail")
+
+pagamentos = (
+    dados
+    .get("transactions", {})
+    .get("payments", [])
+)
+
+print("")
+print("==========================================")
+print("CONSULTA DE PAGAMENTO")
+print("==========================================")
+print("ORDER:", order_id)
+print("STATUS:", status)
+print("STATUS DETAIL:", status_detail)
+
+if pagamentos:
+
+    pagamento = pagamentos[0]
+
+    print(
+        "PAYMENT ID:",
+        pagamento.get("id")
     )
 
-    requisicao = urllib.request.Request(
-
-        url,
-
-        headers={
-
-            "Authorization": "Bearer " + token,
-
-            "Content-Type": "application/json"
-
-        },
-
-        method="GET"
-
+    print(
+        "PAYMENT STATUS:",
+        pagamento.get("status")
     )
 
-    try:
+    print(
+        "PAYMENT STATUS DETAIL:",
+        pagamento.get("status_detail")
+    )
 
-        with urllib.request.urlopen(
-            requisicao,
-            timeout=15
-        ) as resposta:
+print("==========================================")
+print("")
 
-            dados = resposta.read().decode("utf-8")
+# ======================================
+# PAGAMENTO CONFIRMADO
+# ======================================
 
-        resultado = json.loads(dados)
+if (
+    status == "processed"
+    and status_detail == "accredited"
+):
 
-        return resultado
+    return True
 
-    except urllib.error.HTTPError as erro:
+return False
+```
 
-        resposta = erro.read().decode("utf-8")
+# ==========================================
 
-        print("ERRO CONSULTANDO ORDER:")
-        print("HTTP:", erro.code)
-        print(resposta)
+# STATUS DA ORDER PARA DIAGNÓSTICO
 
-        return None
+# ==========================================
 
-    except Exception as erro:
+@app.route("/status-order", methods=["GET"])
+def status_order():
 
-        print("ERRO CONSULTANDO ORDER:")
-        print(erro)
+```
+order_id = request.args.get("order_id")
 
-        return None
+if not order_id:
 
+    return jsonify({
+        "erro": "Informe o order_id",
+        "exemplo":
+            "/status-order?order_id=ORD..."
+    }), 400
 
-# ==========================================================
-# VERIFICAR SE PAGAMENTO FOI APROVADO
-# ==========================================================
+dados = consultar_ordem(order_id)
 
-def verificar_pagamento():
+if not dados:
 
-    global pagamento_aprovado
-    global cobranca_criada
+    return jsonify({
+        "erro":
+            "Não foi possível consultar a Order.",
+        "order_id": order_id
+    }), 500
 
-    while True:
+pagamentos = (
+    dados
+    .get("transactions", {})
+    .get("payments", [])
+)
 
-        time.sleep(INTERVALO_VERIFICACAO)
+return jsonify({
 
-        with lock:
+    "order_id": order_id,
 
-            order_id = ordem_atual
-            ja_tem_pagamento = pagamento_aprovado is not None
+    "status":
+        dados.get("status"),
 
-        if not order_id:
-            continue
+    "status_detail":
+        dados.get("status_detail"),
 
-        if ja_tem_pagamento:
-            continue
+    "payments":
+        pagamentos,
 
-        dados = consultar_ordem(order_id)
+    "order_completa":
+        dados
 
-        if not dados:
-            continue
+}), 200
+```
 
-        status = dados.get("status")
+# ==========================================
 
-        status_detail = dados.get("status_detail")
+# WEBHOOK DO MERCADO PAGO
 
-        print(
-            "CONSULTA ORDER:",
-            order_id,
-            "| STATUS:",
-            status,
-            "| DETALHE:",
-            status_detail
-        )
-
-        if status == "processed":
-
-            with lock:
-
-                if order_id in ids_processados:
-
-                    continue
-
-                ids_processados.add(order_id)
-
-                pagamento_aprovado = {
-
-                    "id": str(order_id),
-
-                    "status": "processado"
-
-                }
-
-                cobranca_criada = False
-
-            print("")
-            print("==========================================")
-            print("PAGAMENTO APROVADO!")
-            print("==========================================")
-            print("ORDER:", order_id)
-            print("STATUS:", status)
-            print("STATUS DETAIL:", status_detail)
-            print("PAGAMENTO DISPONÍVEL PARA O ESP32")
-            print("==========================================")
-            print("")
-
-
-# ==========================================================
-# WEBHOOK
-# ==========================================================
+# ==========================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
-    dados = request.get_json(silent=True) or {}
+```
+dados = request.get_json(
+    silent=True
+) or {}
 
-    data_id_url = request.args.get("data.id")
+data_id_url = request.args.get(
+    "data.id"
+)
 
-    tipo_url = request.args.get("type")
+tipo_url = request.args.get(
+    "type"
+)
 
-    external_reference_url = request.args.get(
+external_reference_url = (
+    request.args.get(
         "data.external_reference"
     )
+)
 
-    tipo_json = dados.get("type")
+tipo_json = dados.get("type")
 
-    action = dados.get("action")
+action = dados.get("action")
 
-    data = dados.get("data", {})
+data = dados.get(
+    "data",
+    {}
+)
 
-    data_id_json = data.get("id")
+data_id_json = data.get("id")
 
-    data_id = data_id_url or data_id_json
+data_id = (
+    data_id_url
+    or data_id_json
+)
 
-    tipo = tipo_url or tipo_json
+tipo = (
+    tipo_url
+    or tipo_json
+)
 
-    print("")
-    print("==========================================")
-    print("WEBHOOK RECEBIDO")
-    print("==========================================")
-    print("TIPO:", tipo)
-    print("ACTION:", action)
-    print("DATA ID:", data_id)
-    print(
-        "EXTERNAL REFERENCE:",
-        external_reference_url
+print("")
+print("==========================================")
+print("WEBHOOK RECEBIDO")
+print("==========================================")
+print("TIPO:", tipo)
+print("ACTION:", action)
+print("DATA ID:", data_id)
+print(
+    "EXTERNAL REFERENCE:",
+    external_reference_url
+)
+print("==========================================")
+print("")
+
+# ======================================
+# IMPORTANTE:
+# NÃO libera o ESP32 apenas porque
+# recebeu um webhook.
+#
+# O webhook apenas informa que houve
+# alteração na Order.
+#
+# A confirmação verdadeira é feita
+# consultando a Order na API.
+# ======================================
+
+if (
+    tipo == "order"
+    and data_id
+):
+
+    aprovado = verificar_order_aprovada(
+        data_id
     )
-    print("CORPO COMPLETO:")
-    print(json.dumps(
-        dados,
-        indent=2,
-        ensure_ascii=False
-    ))
-    print("==========================================")
-    print("")
 
-    return jsonify({
-        "status": "ok"
-    }), 200
+    if aprovado:
 
+        global pagamento_aprovado
 
-# ==========================================================
-# ESP32 CONSULTA PAGAMENTO
-# ==========================================================
+        with lock:
+
+            if data_id not in ids_processados:
+
+                pagamento_aprovado = {
+                    "id": data_id,
+                    "status": "processado"
+                }
+
+                print(
+                    "PAGAMENTO APROVADO PELO WEBHOOK."
+                )
+
+return jsonify({
+    "status": "ok"
+}), 200
+```
+
+# ==========================================
+
+# /PAGAMENTO
+
+#
+
+# O ESP32 chama esta rota a cada 3 segundos.
+
+#
+
+# Agora o próprio servidor consulta
+
+# diretamente a Order atual.
+
+#
+
+# Não dependemos da thread.
+
+# ==========================================
 
 @app.route("/pagamento", methods=["GET"])
 def pagamento():
 
-    global pagamento_aprovado
-    global cobranca_criada
+```
+global pagamento_aprovado
+global cobranca_criada
 
-    pagamento_entregue = None
+# ======================================
+# PRIMEIRO:
+# Se já existe um pagamento aprovado
+# aguardando o ESP32, entrega para ele.
+# ======================================
 
-    with lock:
+with lock:
 
-        if pagamento_aprovado:
+    if pagamento_aprovado:
 
-            pagamento_entregue = pagamento_aprovado
+        pagamento_entregue = (
+            pagamento_aprovado
+        )
 
-            pagamento_aprovado = None
+        pagamento_aprovado = None
 
-    if pagamento_entregue:
+        order_id_entregue = (
+            pagamento_entregue["id"]
+        )
 
-        print("")
-        print("==========================================")
-        print("PAGAMENTO ENTREGUE AO ESP32")
-        print(pagamento_entregue)
-        print("==========================================")
-        print("")
+        ids_processados.add(
+            order_id_entregue
+        )
 
-        time.sleep(1)
+        cobranca_criada = False
 
-        with lock:
+    else:
 
-            existe_cobranca = cobranca_criada
+        pagamento_entregue = None
 
-        if not existe_cobranca:
+# ======================================
+# PAGAMENTO JÁ APROVADO
+# ======================================
 
-            nova_cobranca = criar_cobranca()
+if pagamento_entregue:
 
-            if nova_cobranca:
+    print("")
+    print("==========================================")
+    print("PAGAMENTO ENTREGUE AO ESP32")
+    print("==========================================")
+    print(pagamento_entregue)
+    print("==========================================")
+    print("")
 
-                print(
-                    "PRÓXIMA COBRANÇA DE R$ 5,00 PREPARADA."
-                )
+    # ==================================
+    # CRIA A PRÓXIMA COBRANÇA
+    # ==================================
 
-            else:
+    time.sleep(1)
 
-                print(
-                    "ERRO: NÃO FOI POSSÍVEL CRIAR "
-                    "A PRÓXIMA COBRANÇA."
-                )
+    nova_cobranca = criar_cobranca()
 
-        return jsonify(pagamento_entregue), 200
+    if nova_cobranca:
+
+        print(
+            "PRÓXIMA COBRANÇA DE R$ 5,00 PREPARADA."
+        )
+
+    else:
+
+        print(
+            "ERRO: NÃO FOI POSSÍVEL CRIAR "
+            "A PRÓXIMA COBRANÇA."
+        )
+
+    return jsonify(
+        pagamento_entregue
+    ), 200
+
+# ======================================
+# NÃO TEM PAGAMENTO GUARDADO
+#
+# CONSULTA A ORDER ATUAL DIRETAMENTE.
+# ======================================
+
+with lock:
+
+    order_id = ordem_atual
+
+if not order_id:
 
     return jsonify({
-        "status": "nenhum_pagamento"
+        "status": "nenhuma_cobranca"
     }), 200
 
+# ======================================
+# SE A ORDER JÁ FOI ENTREGUE,
+# NÃO ENTREGA NOVAMENTE.
+# ======================================
 
-# ==========================================================
-# INICIAR PRIMEIRA COBRANÇA
-# ==========================================================
+with lock:
+
+    if order_id in ids_processados:
+
+        return jsonify({
+            "status":
+                "pagamento_ja_entregue"
+        }), 200
+
+# ======================================
+# CONSULTA MERCADO PAGO
+# ======================================
+
+aprovado = verificar_order_aprovada(
+    order_id
+)
+
+if not aprovado:
+
+    return jsonify({
+        "status":
+            "nenhum_pagamento"
+    }), 200
+
+# ======================================
+# PAGAMENTO APROVADO
+# ======================================
+
+with lock:
+
+    if order_id in ids_processados:
+
+        return jsonify({
+            "status":
+                "pagamento_ja_entregue"
+        }), 200
+
+    ids_processados.add(
+        order_id
+    )
+
+pagamento_entregue = {
+    "id": order_id,
+    "status": "processado"
+}
+
+print("")
+print("==========================================")
+print("PAGAMENTO APROVADO!")
+print("==========================================")
+print("ORDER:", order_id)
+print("PAGAMENTO DISPONÍVEL PARA O ESP32")
+print("==========================================")
+print("")
+
+# ======================================
+# CRIA A PRÓXIMA COBRANÇA
+# ======================================
+
+with lock:
+
+    cobranca_criada = False
+
+time.sleep(1)
+
+nova_cobranca = criar_cobranca()
+
+if nova_cobranca:
+
+    print(
+        "PRÓXIMA COBRANÇA DE R$ 5,00 PREPARADA."
+    )
+
+else:
+
+    print(
+        "ERRO AO PREPARAR A PRÓXIMA COBRANÇA."
+    )
+
+return jsonify(
+    pagamento_entregue
+), 200
+```
+
+# ==========================================
+
+# INICIAR
+
+#
+
+# Cria a primeira cobrança de R$ 5,00.
+
+# ==========================================
 
 @app.route("/iniciar", methods=["GET"])
 def iniciar():
 
-    global cobranca_criada
-    global ordem_atual
+```
+global cobranca_criada
+global ordem_atual
 
-    with lock:
+with lock:
 
-        if cobranca_criada:
-
-            return jsonify({
-
-                "status": "ja_existe_cobranca",
-
-                "ordem": ordem_atual,
-
-                "mensagem":
-                    "A Point Pro 3 já possui uma "
-                    "cobrança aguardando pagamento."
-
-            }), 200
-
-    resultado = criar_cobranca()
-
-    if resultado:
+    if cobranca_criada:
 
         return jsonify({
 
-            "status": "cobranca_criada",
+            "status":
+                "ja_existe_cobranca",
+
+            "ordem":
+                ordem_atual,
 
             "mensagem":
-                "Cobrança automática de R$ 5,00 "
-                "criada na Point Pro 3.",
+                "A Point Pro 3 já possui "
+                "uma cobrança aguardando pagamento."
 
-            "mercado_pago": resultado
+        }), 200
 
-        }), 201
+resultado = criar_cobranca()
+
+if resultado:
 
     return jsonify({
 
-        "status": "erro",
+        "status":
+            "cobranca_criada",
 
         "mensagem":
-            "Não foi possível criar a cobrança."
+            "Cobrança automática de R$ 5,00 "
+            "criada na Point Pro 3.",
 
-    }), 500
+        "mercado_pago":
+            resultado
 
+    }), 201
 
-# ==========================================================
-# CONSULTAR TERMINAL
-# ==========================================================
+return jsonify({
+
+    "status":
+        "erro",
+
+    "mensagem":
+        "Não foi possível criar a cobrança."
+
+}), 500
+```
+
+# ==========================================
+
+# TERMINAL
+
+#
+
+# Consulta os terminais Mercado Pago.
+
+# ==========================================
 
 @app.route("/terminal", methods=["GET"])
 def terminal():
 
-    token = os.environ.get("MP_ACCESS_TOKEN")
+```
+token = os.environ.get(
+    "MP_ACCESS_TOKEN"
+)
 
-    if not token:
+if not token:
 
-        return jsonify({
-            "erro": "MP_ACCESS_TOKEN não configurado"
-        }), 500
+    return jsonify({
+        "erro":
+            "MP_ACCESS_TOKEN não configurado"
+    }), 500
 
-    url = "https://api.mercadopago.com/terminals/v1/list"
+url = (
+    "https://api.mercadopago.com/"
+    "terminals/v1/list"
+)
 
-    parametros = urllib.parse.urlencode({
+parametros = urllib.parse.urlencode({
 
-        "limit": "50",
+    "limit": "50",
 
-        "offset": "0",
+    "offset": "0",
 
-        "store_id": "77202273",
+    "store_id":
+        STORE_ID,
 
-        "pos_id": "137651952"
+    "pos_id":
+        POS_ID
 
-    })
+})
 
-    requisicao = urllib.request.Request(
+requisicao = urllib.request.Request(
 
-        url + "?" + parametros,
+    url + "?" + parametros,
 
-        headers={
+    headers={
 
-            "Authorization": "Bearer " + token,
+        "Authorization":
+            "Bearer " + token,
 
-            "Content-Type": "application/json"
+        "Content-Type":
+            "application/json"
 
-        },
+    },
 
-        method="GET"
+    method="GET"
+)
 
-    )
+try:
 
-    try:
+    with urllib.request.urlopen(
+        requisicao,
+        timeout=15
+    ) as resposta:
 
-        with urllib.request.urlopen(
-            requisicao,
-            timeout=15
-        ) as resposta:
+        dados = (
+            resposta
+            .read()
+            .decode("utf-8")
+        )
 
-            dados = resposta.read().decode("utf-8")
+    return jsonify({
 
-        return jsonify({
+        "http_code":
+            200,
 
-            "http_code": 200,
+        "mercado_pago":
+            json.loads(dados)
 
-            "mercado_pago": json.loads(dados)
+    }), 200
 
-        }), 200
+except Exception as erro:
 
-    except Exception as erro:
+    return jsonify({
 
-        return jsonify({
+        "erro":
+            str(erro)
 
-            "erro": str(erro)
+    }), 500
+```
 
-        }), 500
+# ==========================================
 
-
-# ==========================================================
 # PÁGINA INICIAL
-# ==========================================================
+
+# ==========================================
 
 @app.route("/", methods=["GET"])
 def pagina_inicial():
 
-    return """
-    Servidor Mercado Pago + ESP32 funcionando!
+```
+return """
+Servidor Mercado Pago + ESP32 funcionando!
 
-    Sistema automático R$ 5,00.
+Sistema automático R$ 5,00.
 
-    Use /iniciar para preparar a primeira cobrança.
-    """
+/iniciar
+/pagamento
+/terminal
+/status-order?order_id=ORD...
+/webhook
+"""
+```
 
+# ==========================================
 
-# ==========================================================
-# INICIAR SERVIDOR
-# ==========================================================
+# INICIALIZAÇÃO
 
-if __name__ == "__main__":
+# ==========================================
 
-    thread = threading.Thread(
-        target=verificar_pagamento,
-        daemon=True
-    )
+if **name** == "**main**":
 
-    thread.start()
+```
+app.run(
+    host="0.0.0.0",
+    port=10000
+)
+```
 
-    app.run(
-        host="0.0.0.0",
-        port=10000
-    )
+"""
+
+### O que mudou
+
+A principal mudança é esta:
+
+**Antes:** o servidor dependia de uma thread em segundo plano para perceber o pagamento.
+
+**Agora:** o ESP32 já consulta `/pagamento` a cada 3 segundos, então o próprio `/pagamento` consulta diretamente a Order no Mercado Pago e só responde `processado` quando encontrar:
+
+* `status = processed`
+* `status_detail = accredited`
+
+Isso elimina uma parte importante do problema que estávamos investigando.
+
+### Faça exatamente assim
+
+1. Abra o GitHub do projeto.
+2. Abra `server.py`.
+3. Clique no **lápis (Editar)**.
+4. Aperte **Ctrl+A**.
+5. Apague tudo.
+6. Cole **todo o código acima**.
+7. Clique em **Confirmar alterações**.
+8. Aguarde o Render mostrar **Deploy succeeded / Live**.
+
+**Não faça nenhum pagamento ainda.**
+
+Depois que aparecer **Live**, abra:
+
+e confirme que agora aparecem também `/pagamento`, `/terminal` e `/status-order`.
+
+Aí fazemos o próximo teste de forma controlada.
