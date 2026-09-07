@@ -8,7 +8,7 @@ import urllib.parse
 import time
 import threading
 
-app = Flask(**name**)
+app = Flask(__name__)
 
 # ==========================================
 
@@ -751,8 +751,7 @@ Rotas disponíveis:
 
 # ==========================================
 
-if **name** == "**main**":
-
+if __name__ == "__main__":
 ```
 app.run(
     host="0.0.0.0",
