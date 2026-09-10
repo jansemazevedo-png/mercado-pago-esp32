@@ -289,7 +289,51 @@ def monitorar_point():
             print("========================================", flush=True)
 
             time.sleep(INTERVALO_VERIFICACAO)
+@app.route("/teste-token", methods=["GET"])
+def teste_token():
+    token = os.environ.get("MP_ACCESS_TOKEN")
 
+    if not token:
+        return jsonify({
+            "status": "ERRO",
+            "mensagem": "MP_ACCESS_TOKEN nao encontrado no Render"
+        }), 500
+
+    requisicao = urllib.request.Request(
+        "https://api.mercadolibre.com/users/me",
+        headers={
+            "Authorization": "Bearer " + token
+        },
+        method="GET"
+    )
+
+    try:
+        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
+            dados = resposta.read().decode("utf-8")
+
+        resultado = json.loads(dados)
+
+        return jsonify({
+            "status": "TOKEN_VALIDO",
+            "http": 200,
+            "usuario_id": resultado.get("id"),
+            "nickname": resultado.get("nickname")
+        }), 200
+
+    except urllib.error.HTTPError as erro:
+        resposta = erro.read().decode("utf-8")
+
+        return jsonify({
+            "status": "TOKEN_REJEITADO",
+            "http": erro.code,
+            "resposta": resposta
+        }), erro.code
+
+    except Exception as erro:
+        return jsonify({
+            "status": "ERRO",
+            "mensagem": str(erro)
+        }), 500
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
