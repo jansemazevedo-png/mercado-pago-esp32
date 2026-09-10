@@ -1,3 +1,4 @@
+```python
 from flask import Flask, request, jsonify
 import os
 import json
@@ -8,10 +9,6 @@ import threading
 import time
 
 app = Flask(__name__)
-
-# ==========================================
-# CONFIGURAÇÃO
-# ==========================================
 
 VALOR = "5.00"
 
@@ -24,10 +21,6 @@ API_ORDERS = "https://api.mercadopago.com/v1/orders"
 INTERVALO_VERIFICACAO = 3
 ESPERA_PROXIMA_COBRANCA = 3
 
-# ==========================================
-# VARIÁVEIS
-# ==========================================
-
 lock = threading.Lock()
 
 ordem_atual = None
@@ -37,16 +30,11 @@ criando_cobranca = False
 ultimo_webhook = None
 
 
-# ==========================================
-# CONSULTAR ORDER
-# ==========================================
-
 def consultar_ordem(order_id):
-
     token = os.environ.get("MP_ACCESS_TOKEN")
 
     if not token:
-        print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO")
+        print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO", flush=True)
         return None
 
     url = API_ORDERS + "/" + str(order_id)
@@ -61,39 +49,34 @@ def consultar_ordem(order_id):
     )
 
     try:
-
-        with urllib.request.urlopen(
-            requisicao,
-            timeout=15
-        ) as resposta:
-
+        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
             dados = resposta.read().decode("utf-8")
+
+        print("CONSULTA ORDER OK:", order_id, flush=True)
 
         return json.loads(dados)
 
     except urllib.error.HTTPError as erro:
-
         resposta = erro.read().decode("utf-8")
 
-        print("ERRO CONSULTANDO ORDER")
-        print("HTTP:", erro.code)
-        print(resposta)
+        print("========================================", flush=True)
+        print("ERRO CONSULTANDO ORDER", flush=True)
+        print("ORDER:", order_id, flush=True)
+        print("HTTP:", erro.code, flush=True)
+        print("RESPOSTA MERCADO PAGO:", resposta, flush=True)
+        print("========================================", flush=True)
 
         return None
 
     except Exception as erro:
-
-        print("ERRO CONSULTANDO ORDER:", erro)
+        print("========================================", flush=True)
+        print("ERRO CONSULTANDO ORDER:", str(erro), flush=True)
+        print("========================================", flush=True)
 
         return None
 
 
-# ==========================================
-# CRIAR COBRANÇA
-# ==========================================
-
 def criar_cobranca():
-
     global ordem_atual
     global cobranca_criada
     global criando_cobranca
@@ -101,236 +84,153 @@ def criar_cobranca():
     token = os.environ.get("MP_ACCESS_TOKEN")
 
     if not token:
-
-        print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO")
+        print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO", flush=True)
         return None
 
     with lock:
-
         if criando_cobranca:
-
-            print("JA EXISTE UMA COBRANCA SENDO CRIADA")
+            print("JA EXISTE UMA COBRANCA SENDO CRIADA", flush=True)
             return None
 
         if cobranca_criada and ordem_atual:
-
-            print("JA EXISTE UMA COBRANCA ATIVA")
+            print("JA EXISTE UMA COBRANCA ATIVA", flush=True)
             return None
 
         criando_cobranca = True
 
     try:
-
-        referencia = (
-            "auto-r5-" +
-            uuid.uuid4().hex[:12]
-        )
+        referencia = "auto-r5-" + uuid.uuid4().hex[:12]
 
         dados = {
-
             "type": "point",
-
             "external_reference": referencia,
-
             "expiration_time": "PT15M",
-
             "transactions": {
-
                 "payments": [
-
                     {
                         "amount": VALOR
                     }
-
                 ]
-
             },
-
             "config": {
-
                 "point": {
-
                     "terminal_id": TERMINAL_ID,
-
                     "print_on_terminal": "no_ticket"
-
                 }
-
             },
-
             "description": "Venda automatica R$ 5"
-
         }
 
-        corpo = json.dumps(
-            dados
-        ).encode("utf-8")
+        corpo = json.dumps(dados).encode("utf-8")
+
+        print("========================================", flush=True)
+        print("TENTANDO CRIAR NOVA COBRANCA", flush=True)
+        print("TERMINAL:", TERMINAL_ID, flush=True)
+        print("VALOR:", VALOR, flush=True)
+        print("REFERENCIA:", referencia, flush=True)
+        print("========================================", flush=True)
 
         requisicao = urllib.request.Request(
-
             API_ORDERS,
-
             data=corpo,
-
             headers={
-
-                "Authorization":
-                    "Bearer " + token,
-
-                "Content-Type":
-                    "application/json",
-
-                "X-Idempotency-Key":
-                    str(uuid.uuid4())
-
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+                "X-Idempotency-Key": str(uuid.uuid4())
             },
-
             method="POST"
-
         )
 
-        with urllib.request.urlopen(
-            requisicao,
-            timeout=20
-        ) as resposta:
+        with urllib.request.urlopen(requisicao, timeout=20) as resposta:
+            resultado = resposta.read().decode("utf-8")
 
-            resultado = resposta.read().decode(
-                "utf-8"
-            )
-
-        resultado_json = json.loads(
-            resultado
-        )
-
-        nova_ordem = resultado_json.get(
-            "id"
-        )
+        resultado_json = json.loads(resultado)
+        nova_ordem = resultado_json.get("id")
 
         if not nova_ordem:
-
-            print("ERRO: ORDER NAO RETORNOU ID")
-            print(resultado_json)
-
+            print("========================================", flush=True)
+            print("ERRO: ORDER NAO RETORNOU ID", flush=True)
+            print(resultado_json, flush=True)
+            print("========================================", flush=True)
             return None
 
         with lock:
-
             ordem_atual = nova_ordem
             cobranca_criada = True
 
-        print("========================================")
-        print("NOVA COBRANCA CRIADA")
-        print("ORDER:", nova_ordem)
-        print("VALOR: R$ 5,00")
-        print("========================================")
+        print("========================================", flush=True)
+        print("NOVA COBRANCA CRIADA", flush=True)
+        print("ORDER:", nova_ordem, flush=True)
+        print("VALOR: R$ 5,00", flush=True)
+        print("========================================", flush=True)
 
         return resultado_json
 
     except urllib.error.HTTPError as erro:
+        resposta = erro.read().decode("utf-8")
 
-        resposta = erro.read().decode(
-            "utf-8"
-        )
-
-        print("ERRO MERCADO PAGO")
-        print("HTTP:", erro.code)
-        print(resposta)
+        print("========================================", flush=True)
+        print("ERRO MERCADO PAGO AO CRIAR COBRANCA", flush=True)
+        print("HTTP:", erro.code, flush=True)
+        print("RESPOSTA:", resposta, flush=True)
+        print("========================================", flush=True)
 
         return None
 
     except Exception as erro:
-
-        print("ERRO AO CRIAR COBRANCA:", erro)
+        print("========================================", flush=True)
+        print("ERRO AO CRIAR COBRANCA:", str(erro), flush=True)
+        print("========================================", flush=True)
 
         return None
 
     finally:
-
         with lock:
             criando_cobranca = False
 
 
-# ==========================================
-# PREPARAR PRÓXIMA COBRANÇA
-# ==========================================
-
 def preparar_proxima_cobranca():
-
     global ordem_atual
     global cobranca_criada
 
     with lock:
-
         ordem_atual = None
         cobranca_criada = False
 
-    time.sleep(
-        ESPERA_PROXIMA_COBRANCA
-    )
+    print("PREPARANDO PROXIMA COBRANCA...", flush=True)
+
+    time.sleep(ESPERA_PROXIMA_COBRANCA)
 
     criar_cobranca()
 
 
-# ==========================================
-# MONITOR AUTOMÁTICO DA POINT
-# ==========================================
-
 def monitorar_point():
-
-    print("========================================")
-    print("MONITOR AUTOMATICO INICIADO")
-    print("========================================")
+    print("========================================", flush=True)
+    print("MONITOR AUTOMATICO INICIADO", flush=True)
+    print("========================================", flush=True)
 
     while True:
-
         try:
-
             with lock:
-
                 order_id = ordem_atual
                 ativa = cobranca_criada
 
-            # ----------------------------------
-            # SE NÃO EXISTE COBRANÇA
-            # ----------------------------------
-
             if not ativa or not order_id:
-
-                print(
-                    "Nenhuma cobrança ativa."
-                )
+                print("Nenhuma cobrança ativa.", flush=True)
 
                 criar_cobranca()
 
-                time.sleep(
-                    INTERVALO_VERIFICACAO
-                )
-
+                time.sleep(INTERVALO_VERIFICACAO)
                 continue
 
-            # ----------------------------------
-            # CONSULTAR ORDER
-            # ----------------------------------
-
-            dados = consultar_ordem(
-                order_id
-            )
+            dados = consultar_ordem(order_id)
 
             if not dados:
-
-                time.sleep(
-                    INTERVALO_VERIFICACAO
-                )
-
+                time.sleep(INTERVALO_VERIFICACAO)
                 continue
 
-            status = dados.get(
-                "status"
-            )
-
-            status_detail = dados.get(
-                "status_detail"
-            )
+            status = dados.get("status")
+            status_detail = dados.get("status_detail")
 
             print(
                 "ORDER:",
@@ -338,400 +238,203 @@ def monitorar_point():
                 "| STATUS:",
                 status,
                 "| DETAIL:",
-                status_detail
+                status_detail,
+                flush=True
             )
-
-            # ----------------------------------
-            # PAGAMENTO PROCESSADO
-            # ----------------------------------
 
             if status == "processed":
-
-                print("========================================")
-                print("PAGAMENTO PROCESSADO")
-                print("ORDER:", order_id)
-                print("========================================")
+                print("========================================", flush=True)
+                print("PAGAMENTO PROCESSADO", flush=True)
+                print("ORDER:", order_id, flush=True)
+                print("========================================", flush=True)
 
                 preparar_proxima_cobranca()
-
                 continue
-
-            # ----------------------------------
-            # COBRANÇA CANCELADA
-            # ----------------------------------
 
             if status == "canceled":
-
-                print("========================================")
-                print("ORDER CANCELADA")
-                print("ORDER:", order_id)
-                print("========================================")
+                print("========================================", flush=True)
+                print("ORDER CANCELADA", flush=True)
+                print("ORDER:", order_id, flush=True)
+                print("========================================", flush=True)
 
                 preparar_proxima_cobranca()
-
                 continue
-
-            # ----------------------------------
-            # COBRANÇA FALHOU
-            # ----------------------------------
 
             if status == "failed":
-
-                print("========================================")
-                print("ORDER FALHOU")
-                print("ORDER:", order_id)
-                print("========================================")
+                print("========================================", flush=True)
+                print("ORDER FALHOU", flush=True)
+                print("ORDER:", order_id, flush=True)
+                print("========================================", flush=True)
 
                 preparar_proxima_cobranca()
-
                 continue
-
-            # ----------------------------------
-            # COBRANÇA EXPIRADA
-            # ----------------------------------
 
             if status == "expired":
-
-                print("========================================")
-                print("ORDER EXPIRADA")
-                print("ORDER:", order_id)
-                print("========================================")
+                print("========================================", flush=True)
+                print("ORDER EXPIRADA", flush=True)
+                print("ORDER:", order_id, flush=True)
+                print("========================================", flush=True)
 
                 preparar_proxima_cobranca()
-
                 continue
 
-            # ----------------------------------
-            # AT TERMINAL
-            # ----------------------------------
-
             if status == "at_terminal":
+                print("Point aguardando finalizacao.", flush=True)
 
-                print(
-                    "Point aguardando finalizacao."
-                )
-
-            time.sleep(
-                INTERVALO_VERIFICACAO
-            )
+            time.sleep(INTERVALO_VERIFICACAO)
 
         except Exception as erro:
+            print("========================================", flush=True)
+            print("ERRO NO MONITOR:", str(erro), flush=True)
+            print("========================================", flush=True)
 
-            print(
-                "ERRO NO MONITOR:",
-                erro
-            )
-
-            time.sleep(
-                INTERVALO_VERIFICACAO
-            )
+            time.sleep(INTERVALO_VERIFICACAO)
 
 
-# ==========================================
-# WEBHOOK
-# ==========================================
-
-@app.route(
-    "/webhook",
-    methods=["POST"]
-)
+@app.route("/webhook", methods=["POST"])
 def webhook():
-
     global ultimo_webhook
 
-    dados = request.get_json(
-        silent=True
-    ) or {}
+    dados = request.get_json(silent=True) or {}
 
-    data = dados.get(
-        "data",
-        {}
-    )
+    data = dados.get("data", {})
 
     ultimo_webhook = {
-
-        "tipo":
-            dados.get("type"),
-
-        "action":
-            dados.get("action"),
-
-        "data_id":
-            data.get("id"),
-
-        "recebido":
-            dados
-
+        "tipo": dados.get("type"),
+        "action": dados.get("action"),
+        "data_id": data.get("id"),
+        "recebido": dados
     }
 
-    print("========================================")
-    print("WEBHOOK RECEBIDO")
-    print("TIPO:", dados.get("type"))
-    print("ACTION:", dados.get("action"))
-    print("DATA ID:", data.get("id"))
-    print("========================================")
+    print("========================================", flush=True)
+    print("WEBHOOK RECEBIDO", flush=True)
+    print("TIPO:", dados.get("type"), flush=True)
+    print("ACTION:", dados.get("action"), flush=True)
+    print("DATA ID:", data.get("id"), flush=True)
+    print("========================================", flush=True)
 
-    return jsonify({
-        "status": "ok"
-    }), 200
+    return jsonify({"status": "ok"}), 200
 
 
-# ==========================================
-# INICIAR COBRANÇA MANUAL
-# ==========================================
-
-@app.route(
-    "/iniciar",
-    methods=["GET"]
-)
+@app.route("/iniciar", methods=["GET"])
 def iniciar():
-
     with lock:
-
         if cobranca_criada and ordem_atual:
-
             return jsonify({
-
-                "status":
-                    "ja_existe_cobranca",
-
-                "ordem":
-                    ordem_atual
-
+                "status": "ja_existe_cobranca",
+                "ordem": ordem_atual
             }), 200
 
     resultado = criar_cobranca()
 
     if resultado:
-
         return jsonify({
-
-            "status":
-                "cobranca_criada",
-
-            "mensagem":
-                "Cobranca de R$ 5,00 criada na Point Pro 3",
-
-            "mercado_pago":
-                resultado
-
+            "status": "cobranca_criada",
+            "mensagem": "Cobranca de R$ 5,00 criada na Point Pro 3",
+            "mercado_pago": resultado
         }), 201
 
     return jsonify({
-
-        "status":
-            "erro",
-
-        "mensagem":
-            "Nao foi possivel criar a cobranca"
-
+        "status": "erro",
+        "mensagem": "Nao foi possivel criar a cobranca"
     }), 500
 
 
-# ==========================================
-# STATUS DA ORDER
-# ==========================================
-
-@app.route(
-    "/status-order",
-    methods=["GET"]
-)
+@app.route("/status-order", methods=["GET"])
 def status_order():
-
-    order_id = request.args.get(
-        "order_id"
-    )
+    order_id = request.args.get("order_id")
 
     if not order_id:
-
         return jsonify({
-
-            "erro":
-                "Informe o order_id"
-
+            "erro": "Informe o order_id"
         }), 400
 
-    dados = consultar_ordem(
-        order_id
-    )
+    dados = consultar_ordem(order_id)
 
     if not dados:
-
         return jsonify({
-
-            "erro":
-                "Nao foi possivel consultar a Order.",
-
-            "order_id":
-                order_id
-
+            "erro": "Nao foi possivel consultar a Order.",
+            "order_id": order_id,
+            "detalhe": "Veja os Logs do Render para identificar a resposta do Mercado Pago."
         }), 500
 
-    pagamentos = (
-        dados
-        .get("transactions", {})
-        .get("payments", [])
+    pagamentos = dados.get(
+        "transactions",
+        {}
+    ).get(
+        "payments",
+        []
     )
 
     return jsonify({
-
-        "order_id":
-            order_id,
-
-        "status":
-            dados.get("status"),
-
-        "status_detail":
-            dados.get("status_detail"),
-
-        "payments":
-            pagamentos
-
+        "order_id": order_id,
+        "status": dados.get("status"),
+        "status_detail": dados.get("status_detail"),
+        "payments": pagamentos
     }), 200
 
 
-# ==========================================
-# /PAGAMENTO
-# MANTIDO APENAS POR COMPATIBILIDADE
-# ==========================================
-
-@app.route(
-    "/pagamento",
-    methods=["GET"]
-)
+@app.route("/pagamento", methods=["GET"])
 def pagamento():
-
     with lock:
-
         order_id = ordem_atual
 
     if not order_id:
-
         return jsonify({
-
-            "status":
-                "nenhuma_cobranca"
-
+            "status": "nenhuma_cobranca"
         }), 200
 
-    dados = consultar_ordem(
-        order_id
-    )
+    dados = consultar_ordem(order_id)
 
     if not dados:
-
         return jsonify({
-
-            "status":
-                "erro_consulta"
-
+            "status": "erro_consulta"
         }), 200
 
-    status = dados.get(
-        "status"
-    )
+    status = dados.get("status")
 
     return jsonify({
-
-        "status_order":
-            status,
-
-        "ordem":
-            order_id,
-
-        "mensagem":
-            "ESP32 sera acionado pelo botao fisico da impressao"
-
+        "status_order": status,
+        "ordem": order_id,
+        "mensagem": "ESP32 sera acionado pelo botao fisico da impressao"
     }), 200
 
 
-# ==========================================
-# STATUS DO SERVIDOR
-# ==========================================
-
-@app.route(
-    "/terminal",
-    methods=["GET"]
-)
+@app.route("/terminal", methods=["GET"])
 def terminal():
-
     with lock:
-
         order_id = ordem_atual
         ativa = cobranca_criada
         criando = criando_cobranca
 
     return jsonify({
-
-        "servidor":
-            "online",
-
-        "valor":
-            VALOR,
-
-        "terminal_id":
-            TERMINAL_ID,
-
-        "pos_id":
-            POS_ID,
-
-        "store_id":
-            STORE_ID,
-
-        "cobranca_criada":
-            ativa,
-
-        "criando_cobranca":
-            criando,
-
-        "ordem_atual":
-            order_id,
-
-        "modo_esp32":
-            "botao_fisico_apos_impressao"
-
+        "servidor": "online",
+        "valor": VALOR,
+        "terminal_id": TERMINAL_ID,
+        "pos_id": POS_ID,
+        "store_id": STORE_ID,
+        "cobranca_criada": ativa,
+        "criando_cobranca": criando,
+        "ordem_atual": order_id,
+        "modo_esp32": "botao_fisico_apos_impressao"
     }), 200
 
 
-# ==========================================
-# ÚLTIMO WEBHOOK
-# ==========================================
-
-@app.route(
-    "/ultimo-webhook",
-    methods=["GET"]
-)
+@app.route("/ultimo-webhook", methods=["GET"])
 def ultimo_webhook_route():
-
     return jsonify(
         ultimo_webhook or {
-            "status":
-                "nenhum_webhook_recebido"
+            "status": "nenhum_webhook_recebido"
         }
-    ), 200
-
-
-# ==========================================
-# PÁGINA INICIAL
-# ==========================================
-
-@app.route(
-    "/",
-    methods=["GET"]
-)
-def pagina_inicial():
-
-    return (
-        "Servidor Mercado Pago + ESP32 funcionando!"
     )
 
 
-# ==========================================
-# INICIAR MONITOR
-# ==========================================
+@app.route("/", methods=["GET"])
+def pagina_inicial():
+    return "Servidor Mercado Pago + ESP32 funcionando!"
+
 
 def iniciar_monitor():
-
     thread = threading.Thread(
         target=monitorar_point,
         daemon=True
@@ -740,12 +443,7 @@ def iniciar_monitor():
     thread.start()
 
 
-# ==========================================
-# EXECUÇÃO
-# ==========================================
-
 if __name__ == "__main__":
-
     iniciar_monitor()
 
     porta = int(
@@ -759,3 +457,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=porta
     )
+```
