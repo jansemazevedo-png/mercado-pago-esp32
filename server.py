@@ -496,7 +496,7 @@ if __name__ == "__main__":
             "10000"
         )
     )
-
+# Teste de deploy automatico
     app.run(
         host="0.0.0.0",
         port=porta
