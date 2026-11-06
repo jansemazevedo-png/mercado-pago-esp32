@@ -115,31 +115,31 @@ def criar_cobranca():
     global reinicio_solicitado
     global reinicio_autorizado
 
+    
     token = os.environ.get("MP_ACCESS_TOKEN")
 
-   not token:
+    if not token:
         print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO", flush=True)
-        return None if 
+        return None
 
     with lock:
-         if reinicio_solicitado or reinicio_autorizado:
+        if reinicio_solicitado or reinicio_autorizado:
             print("REINICIO SOLICITADO: NOVA COBRANCA BLOQUEADA", flush=True)
             return None
 
-         if criando_cobranca:
+        if criando_cobranca:
             print("JA EXISTE UMA COBRANCA SENDO CRIADA", flush=True)
             return None
 
-         if cobranca_criada and ordem_atual:
+        if cobranca_criada and ordem_atual:
             print("JA EXISTE UMA COBRANCA REGISTRADA", flush=True)
             return None
-        
 
-         if time.time() < proxima_tentativa_cobranca:
+        if time.time() < proxima_tentativa_cobranca:
             print("AGUARDANDO INTERVALO PARA NOVA TENTATIVA", flush=True)
             return None
 
-         if chave_idempotencia_pendente is None:
+        if chave_idempotencia_pendente is None:
             referencia_pendente = "auto-r5-" + uuid.uuid4().hex[:12]
 
             dados_cobranca_pendente = {
@@ -389,20 +389,37 @@ def teste_token():
             "nickname": resultado.get("nickname")
         }), 200
 
+   
     except urllib.error.HTTPError as erro:
         resposta = erro.read().decode("utf-8", errors="replace")
 
-        return jsonify({
-            "status": "TOKEN_REJEITADO",
-            "http": erro.code,
-            "resposta": resposta
-        }), erro.code
+        print("ERRO MERCADO PAGO AO CRIAR COBRANCA", flush=True)
+        print("HTTP:", erro.code, flush=True)
+        print("RESPOSTA:", resposta, flush=True)
+
+        with lock:
+            proxima_tentativa_cobranca = (
+                time.time() + ESPERA_FALHA_CRIACAO
+            )
+
+            if erro.code == 409:
+                print(
+                    "ATENCAO: JA EXISTE UMA ORDER NA FILA DO TERMINAL.",
+                    flush=True
+                )
+                print(
+                    "BLOQUEANDO NOVAS REFERENCIAS ATE VERIFICAR A ORDER.",
+                    flush=True
+                )
+
+            elif erro.code != 429 and erro.code < 500:
+                chave_idempotencia_pendente = None
+                dados_cobranca_pendente = None
+                referencia_pendente = None
+
+        return None
 
     except Exception as erro:
-        return jsonify({
-            "status": "ERRO",
-            "mensagem": str(erro)
-        }), 500
 
 
 # ==========================================
@@ -438,7 +455,7 @@ def webhook():
 # INICIAR COBRANCA MANUALMENTE
 # ==========================================
 
-x@app.route("/iniciar", methods=["GET"])
+@app.route("/iniciar", methods=["GET"])
 def iniciar():
     with lock:
         if reinicio_solicitado or reinicio_autorizado:
