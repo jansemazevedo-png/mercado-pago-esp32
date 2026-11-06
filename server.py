@@ -1,8 +1,8 @@
-
 from flask import Flask, request, jsonify
 import os
 import json
 import uuid
+import hmac
 import urllib.request
 import urllib.error
 import threading
@@ -47,6 +47,9 @@ referencia_pendente = None
 
 proxima_tentativa_cobranca = 0
 monitor_iniciado = False
+
+reinicio_solicitado = False
+reinicio_autorizado = False
 
 
 # ==========================================
@@ -109,27 +112,34 @@ def criar_cobranca():
     global dados_cobranca_pendente
     global referencia_pendente
     global proxima_tentativa_cobranca
+    global reinicio_solicitado
+    global reinicio_autorizado
 
     token = os.environ.get("MP_ACCESS_TOKEN")
 
-    if not token:
+   not token:
         print("ERRO: MP_ACCESS_TOKEN NAO CONFIGURADO", flush=True)
-        return None
+        return None if 
 
     with lock:
-        if criando_cobranca:
+         if reinicio_solicitado or reinicio_autorizado:
+            print("REINICIO SOLICITADO: NOVA COBRANCA BLOQUEADA", flush=True)
+            return None
+
+         if criando_cobranca:
             print("JA EXISTE UMA COBRANCA SENDO CRIADA", flush=True)
             return None
 
-        if cobranca_criada and ordem_atual:
+         if cobranca_criada and ordem_atual:
             print("JA EXISTE UMA COBRANCA REGISTRADA", flush=True)
             return None
+        
 
-        if time.time() < proxima_tentativa_cobranca:
+         if time.time() < proxima_tentativa_cobranca:
             print("AGUARDANDO INTERVALO PARA NOVA TENTATIVA", flush=True)
             return None
 
-        if chave_idempotencia_pendente is None:
+         if chave_idempotencia_pendente is None:
             referencia_pendente = "auto-r5-" + uuid.uuid4().hex[:12]
 
             dados_cobranca_pendente = {
@@ -259,6 +269,7 @@ def criar_cobranca():
 # ==========================================
 
 def preparar_proxima_cobranca():
+   def preparar_proxima_cobranca():
     global ordem_atual
     global status_order_atual
     global cobranca_criada
@@ -268,12 +279,18 @@ def preparar_proxima_cobranca():
         status_order_atual = None
         cobranca_criada = False
 
+        if reinicio_solicitado or reinicio_autorizado:
+            print(
+                "REINICIO SOLICITADO. PROXIMA COBRANCA NAO SERA CRIADA.",
+                flush=True
+            )
+            return
+
     print("PREPARANDO PROXIMA COBRANCA...", flush=True)
 
     time.sleep(ESPERA_PROXIMA_COBRANCA)
 
     criar_cobranca()
-
 
 # ==========================================
 # MONITOR AUTOMATICO DA POINT
@@ -290,11 +307,15 @@ def monitorar_point():
                 order_id = ordem_atual
                 ativa = cobranca_criada
 
-            if not ativa or not order_id:
-                criar_cobranca()
+                       if not ativa or not order_id:
+                with lock:
+                    reiniciando = reinicio_solicitado or reinicio_autorizado
+
+                if not reiniciando:
+                    criar_cobranca()
+
                 time.sleep(INTERVALO_VERIFICACAO)
                 continue
-
             dados = consultar_ordem(order_id)
 
             if not dados:
@@ -417,9 +438,15 @@ def webhook():
 # INICIAR COBRANCA MANUALMENTE
 # ==========================================
 
-@app.route("/iniciar", methods=["GET"])
+x@app.route("/iniciar", methods=["GET"])
 def iniciar():
     with lock:
+        if reinicio_solicitado or reinicio_autorizado:
+            return jsonify({
+                "status": "reinicio_em_andamento",
+                "mensagem": "Aguardando reinicio seguro do servidor."
+            }), 409
+
         if cobranca_criada and ordem_atual:
             return jsonify({
                 "status": "ja_existe_cobranca",
@@ -451,6 +478,7 @@ def iniciar():
     }), 500
 
 
+# ==========================================
 # ==========================================
 # CONSULTAR ORDER MANUALMENTE
 # Esta rota faz uma chamada a API por acesso.
