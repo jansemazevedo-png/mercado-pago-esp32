@@ -269,7 +269,6 @@ def criar_cobranca():
 # ==========================================
 
 def preparar_proxima_cobranca():
-   def preparar_proxima_cobranca():
     global ordem_atual
     global status_order_atual
     global cobranca_criada
@@ -287,10 +286,9 @@ def preparar_proxima_cobranca():
             return
 
     print("PREPARANDO PROXIMA COBRANCA...", flush=True)
-
     time.sleep(ESPERA_PROXIMA_COBRANCA)
-
     criar_cobranca()
+
 
 # ==========================================
 # MONITOR AUTOMATICO DA POINT
@@ -307,7 +305,7 @@ def monitorar_point():
                 order_id = ordem_atual
                 ativa = cobranca_criada
 
-                       if not ativa or not order_id:
+            if not ativa or not order_id:
                 with lock:
                     reiniciando = reinicio_solicitado or reinicio_autorizado
 
@@ -316,6 +314,7 @@ def monitorar_point():
 
                 time.sleep(INTERVALO_VERIFICACAO)
                 continue
+
             dados = consultar_ordem(order_id)
 
             if not dados:
@@ -389,37 +388,28 @@ def teste_token():
             "nickname": resultado.get("nickname")
         }), 200
 
-   
     except urllib.error.HTTPError as erro:
         resposta = erro.read().decode("utf-8", errors="replace")
-
-        print("ERRO MERCADO PAGO AO CRIAR COBRANCA", flush=True)
-        print("HTTP:", erro.code, flush=True)
-        print("RESPOSTA:", resposta, flush=True)
-
-        with lock:
-            proxima_tentativa_cobranca = (
-                time.time() + ESPERA_FALHA_CRIACAO
-            )
-
-            if erro.code == 409:
-                print(
-                    "ATENCAO: JA EXISTE UMA ORDER NA FILA DO TERMINAL.",
-                    flush=True
-                )
-                print(
-                    "BLOQUEANDO NOVAS REFERENCIAS ATE VERIFICAR A ORDER.",
-                    flush=True
-                )
-
-            elif erro.code != 429 and erro.code < 500:
-                chave_idempotencia_pendente = None
-                dados_cobranca_pendente = None
-                referencia_pendente = None
-
-        return None
+        print(
+            "ERRO AO TESTAR TOKEN | HTTP:",
+            erro.code,
+            "| RESPOSTA:",
+            resposta,
+            flush=True
+        )
+        return jsonify({
+            "status": "ERRO",
+            "http": erro.code,
+            "mensagem": "Mercado Pago rejeitou o token",
+            "detalhe": resposta
+        }), erro.code
 
     except Exception as erro:
+        print("ERRO AO TESTAR TOKEN:", str(erro), flush=True)
+        return jsonify({
+            "status": "ERRO",
+            "mensagem": str(erro)
+        }), 500
 
 
 # ==========================================
