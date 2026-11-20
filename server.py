@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import json
 import uuid
+import hmac
 import urllib.request
 import urllib.error
 import threading
@@ -38,12 +39,6 @@ cobranca_criada = False
 criando_cobranca = False
 
 ultimo_webhook = None
-
-# O webhook apenas acorda o monitor. A proxima cobranca so e
-# preparada depois que a API confirmar que a Order terminou.
-evento_webhook = threading.Event()
-webhook_order_id_pendente = None
-webhook_action_pendente = None
 
 # Reutilizados se uma tentativa precisar ser repetida.
 chave_idempotencia_pendente = None
@@ -117,7 +112,10 @@ def criar_cobranca():
     global dados_cobranca_pendente
     global referencia_pendente
     global proxima_tentativa_cobranca
+    global reinicio_solicitado
+    global reinicio_autorizado
 
+    
     token = os.environ.get("MP_ACCESS_TOKEN")
 
     if not token:
@@ -239,8 +237,9 @@ def criar_cobranca():
                 time.time() + ESPERA_FALHA_CRIACAO
             )
 
-            # Preservar a chave e o corpo em erros de limite ou servidor.
-            # Nos demais erros HTTP, manter o comportamento anterior.
+            # Para erros de limite ou do servidor, preservar a mesma
+            # chave e o mesmo corpo para uma eventual repeticao.
+            # Para outros erros HTTP, a resposta indica rejeicao.
             if erro.code != 429 and erro.code < 500:
                 chave_idempotencia_pendente = None
                 dados_cobranca_pendente = None
@@ -273,16 +272,11 @@ def preparar_proxima_cobranca():
     global ordem_atual
     global status_order_atual
     global cobranca_criada
-    global webhook_order_id_pendente
-    global webhook_action_pendente
 
     with lock:
         ordem_atual = None
         status_order_atual = None
         cobranca_criada = False
-        webhook_order_id_pendente = None
-        webhook_action_pendente = None
-        evento_webhook.clear()
 
         if reinicio_solicitado or reinicio_autorizado:
             print(
@@ -302,8 +296,6 @@ def preparar_proxima_cobranca():
 
 def monitorar_point():
     global status_order_atual
-    global webhook_order_id_pendente
-    global webhook_action_pendente
 
     print("MONITOR AUTOMATICO INICIADO", flush=True)
 
@@ -312,31 +304,16 @@ def monitorar_point():
             with lock:
                 order_id = ordem_atual
                 ativa = cobranca_criada
-                reiniciando = reinicio_solicitado or reinicio_autorizado
-                id_webhook = webhook_order_id_pendente
-                acao_webhook = webhook_action_pendente
 
             if not ativa or not order_id:
+                with lock:
+                    reiniciando = reinicio_solicitado or reinicio_autorizado
+
                 if not reiniciando:
-                    print(
-                        "MONITOR: NAO HA ORDER ATIVA; VERIFICANDO CRIACAO.",
-                        flush=True
-                    )
                     criar_cobranca()
 
-                evento_webhook.wait(INTERVALO_VERIFICACAO)
-                evento_webhook.clear()
+                time.sleep(INTERVALO_VERIFICACAO)
                 continue
-
-            # Se chegou webhook da Order atual, a consulta e antecipada.
-            if id_webhook and str(id_webhook) == str(order_id):
-                print(
-                    "MONITOR ACORDADO PELO WEBHOOK:",
-                    acao_webhook,
-                    "| ORDER:",
-                    order_id,
-                    flush=True
-                )
 
             dados = consultar_ordem(order_id)
 
@@ -347,17 +324,14 @@ def monitorar_point():
                     "SEGUNDOS.",
                     flush=True
                 )
-                evento_webhook.wait(ESPERA_FALHA_CONSULTA)
-                evento_webhook.clear()
+                time.sleep(ESPERA_FALHA_CONSULTA)
                 continue
 
             status = dados.get("status")
             status_detail = dados.get("status_detail")
 
             with lock:
-                # Confere novamente se a Order nao mudou durante a consulta.
-                if str(ordem_atual) == str(order_id):
-                    status_order_atual = status
+                status_order_atual = status
 
             print(
                 "ORDER:", order_id,
@@ -371,21 +345,14 @@ def monitorar_point():
                 preparar_proxima_cobranca()
                 continue
 
-            # O webhook nao substitui a confirmacao da API.
-            # Se a API ainda mostrar status nao final, o monitor continua
-            # consultando normalmente, sem criar outra cobranca.
-            with lock:
-                if str(webhook_order_id_pendente) == str(order_id):
-                    webhook_order_id_pendente = None
-                    webhook_action_pendente = None
+            if status == "at_terminal":
+                print("POINT AGUARDANDO FINALIZACAO.", flush=True)
 
-            evento_webhook.wait(INTERVALO_VERIFICACAO)
-            evento_webhook.clear()
+            time.sleep(INTERVALO_VERIFICACAO)
 
         except Exception as erro:
             print("ERRO NO MONITOR:", str(erro), flush=True)
-            evento_webhook.wait(INTERVALO_VERIFICACAO)
-            evento_webhook.clear()
+            time.sleep(INTERVALO_VERIFICACAO)
 
 
 # ==========================================
@@ -452,50 +419,24 @@ def teste_token():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global ultimo_webhook
-    global webhook_order_id_pendente
-    global webhook_action_pendente
 
     dados = request.get_json(silent=True) or {}
-    data = dados.get("data") or {}
-    if not isinstance(data, dict):
-        data = {}
+    data = dados.get("data", {})
 
-    tipo = dados.get("type")
-    action = dados.get("action")
-    data_id = data.get("id")
-
-    with lock:
-        ultimo_webhook = {
-            "tipo": tipo,
-            "action": action,
-            "data_id": data_id,
-            "recebido": dados
-        }
-
-        # Somente notificacoes de Order referentes a Order atual acordam
-        # o monitor. A API ainda precisa confirmar o status final.
-        if (
-            tipo == "order"
-            and data_id
-            and str(data_id) == str(ordem_atual)
-        ):
-            webhook_order_id_pendente = str(data_id)
-            webhook_action_pendente = action
-            evento_webhook.set()
+    ultimo_webhook = {
+        "tipo": dados.get("type"),
+        "action": dados.get("action"),
+        "data_id": data.get("id"),
+        "recebido": dados
+    }
 
     print(
         "WEBHOOK RECEBIDO:",
-        tipo,
-        action,
-        data_id,
+        dados.get("type"),
+        dados.get("action"),
+        data.get("id"),
         flush=True
     )
-
-    if tipo == "order" and data_id:
-        print(
-            "WEBHOOK DE ORDER REGISTRADO; MONITOR NOTIFICADO SE FOR A ORDER ATUAL.",
-            flush=True
-        )
 
     return jsonify({"status": "ok"}), 200
 
@@ -544,6 +485,7 @@ def iniciar():
     }), 500
 
 
+# ==========================================
 # ==========================================
 # CONSULTAR ORDER MANUALMENTE
 # Esta rota faz uma chamada a API por acesso.
@@ -615,7 +557,6 @@ def terminal():
         ativa = cobranca_criada
         criando = criando_cobranca
         status = status_order_atual
-        webhook_pendente = webhook_order_id_pendente
 
     return jsonify({
         "servidor": "online",
@@ -627,8 +568,6 @@ def terminal():
         "criando_cobranca": criando,
         "ordem_atual": order_id,
         "status_order": status,
-        "webhook_order_pendente": webhook_pendente,
-        "monitor_iniciado": monitor_iniciado,
         "modo_esp32": "botao_fisico_apos_impressao"
     }), 200
 
@@ -673,8 +612,7 @@ def iniciar_monitor():
 
     thread = threading.Thread(
         target=monitorar_point,
-        daemon=True,
-        name="monitor-mercado-pago"
+        daemon=True
     )
     thread.start()
 
